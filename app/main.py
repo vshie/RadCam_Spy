@@ -392,14 +392,19 @@ def get_status():
 def list_logs():
     ensure_dirs()
     logs = []
-    for f in sorted(LOGS_DIR.glob("*.ndjson"), reverse=True):
-        stat = f.stat()
+    for f in LOGS_DIR.glob("*.ndjson"):
+        st = f.stat()
+        sample_count = 0
+        if st.st_size > 0:
+            with open(f) as fh:
+                sample_count = sum(1 for _ in fh)
         logs.append({
             "name": f.name,
-            "size": stat.st_size,
-            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            "samples": sum(1 for _ in open(f)) if stat.st_size > 0 else 0,
+            "size": st.st_size,
+            "modified": datetime.fromtimestamp(st.st_mtime).isoformat(),
+            "samples": sample_count,
         })
+    logs.sort(key=lambda x: x["modified"], reverse=True)
     return jsonify({"logs": logs})
 
 
@@ -443,6 +448,55 @@ def log_data(name):
 
             records.append(rec)
             prev = rec
+
+    return jsonify({"records": records})
+
+
+@app.route("/api/live", methods=["GET"])
+def live_data():
+    """Return recent records from the active log for live charting."""
+    with monitor_lock:
+        log_name = monitor_state.get("current_log")
+        running = monitor_state["running"]
+
+    if not log_name or not running:
+        return jsonify({"records": []})
+
+    path = LOGS_DIR / log_name
+    if not path.exists():
+        return jsonify({"records": []})
+
+    limit = request.args.get("limit", 120, type=int)
+
+    lines = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                lines.append(line)
+
+    lines = lines[-limit:]
+
+    records = []
+    prev = None
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        if prev is not None and "cpu_percent" not in rec:
+            cpu_pct = compute_cpu_percent(prev, rec)
+            if cpu_pct is not None:
+                rec["cpu_percent"] = cpu_pct
+
+        if "mem_memtotal_kb" in rec and "mem_memfree_kb" in rec:
+            total = rec["mem_memtotal_kb"]
+            free = rec["mem_memfree_kb"]
+            rec["mem_used_percent"] = round(100.0 * (total - free) / total, 1) if total > 0 else 0
+
+        records.append(rec)
+        prev = rec
 
     return jsonify({"records": records})
 
