@@ -1,11 +1,35 @@
 FROM python:3.11-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir flask
 
 WORKDIR /app
 COPY app/ .
 
 RUN mkdir -p /app/data/logs
+
+# Bundle all frontend vendor dependencies so the UI works fully offline.
+RUN mkdir -p /app/static/vendor/mdi/css /app/static/vendor/mdi/fonts \
+    && curl -sL -o /app/static/vendor/vue.global.prod.js \
+       "https://cdn.jsdelivr.net/npm/vue@3.3.11/dist/vue.global.prod.js" \
+    && curl -sL -o /app/static/vendor/vuetify.min.js \
+       "https://cdn.jsdelivr.net/npm/vuetify@3.4.6/dist/vuetify.min.js" \
+    && curl -sL -o /app/static/vendor/vuetify.min.css \
+       "https://cdn.jsdelivr.net/npm/vuetify@3.4.6/dist/vuetify.min.css" \
+    && curl -sL -o /app/static/vendor/chart.umd.min.js \
+       "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" \
+    && curl -sL -o /app/static/vendor/mdi/css/materialdesignicons.min.css \
+       "https://cdn.jsdelivr.net/npm/@mdi/font@7.3.67/css/materialdesignicons.min.css" \
+    && curl -sL -o /app/static/vendor/mdi/fonts/materialdesignicons-webfont.woff2 \
+       "https://cdn.jsdelivr.net/npm/@mdi/font@7.3.67/fonts/materialdesignicons-webfont.woff2" \
+    && curl -sL -o /app/static/vendor/mdi/fonts/materialdesignicons-webfont.woff \
+       "https://cdn.jsdelivr.net/npm/@mdi/font@7.3.67/fonts/materialdesignicons-webfont.woff" \
+    && curl -sL -o /app/static/vendor/mdi/fonts/materialdesignicons-webfont.eot \
+       "https://cdn.jsdelivr.net/npm/@mdi/font@7.3.67/fonts/materialdesignicons-webfont.eot" \
+    && curl -sL -o /app/static/vendor/mdi/fonts/materialdesignicons-webfont.ttf \
+       "https://cdn.jsdelivr.net/npm/@mdi/font@7.3.67/fonts/materialdesignicons-webfont.ttf"
 
 ENV PYTHONUNBUFFERED=1
 
