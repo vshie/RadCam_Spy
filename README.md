@@ -26,6 +26,32 @@ Install directly from the BlueOS Extensions Manager store once published.
    - **Docker image**: `your-dockerhub-user/radcam-spy`
    - **Docker tag**: `main`
 
+## Custom Settings (Permissions)
+
+When manually installing, paste this into the **Custom settings** field:
+
+```json
+{
+  "ExposedPorts": {
+    "9850/tcp": {}
+  },
+  "HostConfig": {
+    "Binds": [
+      "/usr/blueos/extensions/radcam-spy:/app/data"
+    ],
+    "ExtraHosts": ["host.docker.internal:host-gateway"],
+    "PortBindings": {
+      "9850/tcp": [
+        {
+          "HostPort": ""
+        }
+      ]
+    },
+    "NetworkMode": "host"
+  }
+}
+```
+
 ## Development
 
 ### Local Testing
