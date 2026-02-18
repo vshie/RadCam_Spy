@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RadCam Spy Widget</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1e1e1e;
+      color: #e0e0e0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 12px;
+    }
+    .widget {
+      text-align: center;
+      width: 100%;
+      max-width: 280px;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #616161;
+      flex-shrink: 0;
+    }
+    .dot.running { background: #4caf50; box-shadow: 0 0 6px #4caf5088; }
+    .dot.error   { background: #f44336; box-shadow: 0 0 6px #f4433688; }
+    .status-text {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      padding: 12px 20px;
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+      color: #fff;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-start { background: #4caf50; }
+    .btn-start:hover:not(:disabled) { background: #43a047; }
+    .btn-stop  { background: #f44336; }
+    .btn-stop:hover:not(:disabled)  { background: #e53935; }
+    .info {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #999;
+    }
+    .info span { color: #ccc; font-weight: 600; }
+    .error-msg {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #ef9a9a;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <div class="widget" id="widget">
+    <div class="status-row">
+      <div class="dot" id="dot"></div>
+      <div class="status-text" id="statusText">Idle</div>
+    </div>
+
+    <button class="btn btn-start" id="startBtn" onclick="doStart()">
+      &#9654; Start Monitoring
+    </button>
+    <button class="btn btn-stop" id="stopBtn" onclick="doStop()" style="display:none;">
+      &#9632; Stop Monitoring
+    </button>
+
+    <div class="info" id="info"></div>
+    <div class="error-msg" id="errorMsg"></div>
+  </div>
+
+  <script>
+    const dot = document.getElementById('dot');
+    const statusText = document.getElementById('statusText');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const info = document.getElementById('info');
+    const errorMsg = document.getElementById('errorMsg');
+
+    let polling = null;
+
+    function updateUI(data) {
+      errorMsg.textContent = '';
+      dot.className = 'dot';
+
+      if (data.error) {
+        dot.classList.add('error');
+        statusText.textContent = 'Error';
+        errorMsg.textContent = data.error;
+        startBtn.style.display = '';
+        stopBtn.style.display = 'none';
+        startBtn.disabled = false;
+      } else if (data.running) {
+        dot.classList.add('running');
+        statusText.textContent = 'Monitoring';
+        startBtn.style.display = 'none';
+        stopBtn.style.display = '';
+        stopBtn.disabled = false;
+        let parts = [];
+        if (data.samples != null) parts.push('Samples: <span>' + data.samples + '</span>');
+        if (data.last_sample && data.last_sample.temp_c != null) parts.push('Temp: <span>' + data.last_sample.temp_c + '°C</span>');
+        info.innerHTML = parts.join(' &middot; ');
+      } else {
+        statusText.textContent = 'Idle';
+        startBtn.style.display = '';
+        stopBtn.style.display = 'none';
+        startBtn.disabled = false;
+        info.innerHTML = '';
+      }
+    }
+
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        updateUI(data);
+      } catch (e) {
+        errorMsg.textContent = 'Connection lost';
+      }
+    }
+
+    async function doStart() {
+      startBtn.disabled = true;
+      try {
+        const res = await fetch('/api/start', { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) errorMsg.textContent = data.message || 'Start failed';
+      } catch (e) {
+        errorMsg.textContent = 'Request failed';
+      }
+      await fetchStatus();
+    }
+
+    async function doStop() {
+      stopBtn.disabled = true;
+      try {
+        await fetch('/api/stop', { method: 'POST' });
+      } catch (e) {
+        errorMsg.textContent = 'Request failed';
+      }
+      await fetchStatus();
+    }
+
+    fetchStatus();
+    polling = setInterval(fetchStatus, 2000);
+  </script>
+</body>
+</html>

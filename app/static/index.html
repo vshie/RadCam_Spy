@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RadCam Spy</title>
+  <link href="https://cdn.jsdelivr.net/npm/vuetify@3.4.6/dist/vuetify.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.3.67/css/materialdesignicons.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.3.11/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vuetify@3.4.6/dist/vuetify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; background: #121212; }
+    [v-cloak] { display: none; }
+  </style>
+</head>
+<body>
+  <div id="app" v-cloak>
+    <v-app theme="dark">
+      <v-app-bar density="compact" color="surface">
+        <v-app-bar-title>
+          <v-icon class="mr-2">mdi-camera-wireless</v-icon>
+          RadCam Spy
+        </v-app-bar-title>
+        <template v-slot:append>
+          <v-chip :color="statusColor" variant="flat" size="small" class="mr-2">
+            <v-icon start size="x-small">mdi-circle</v-icon>
+            {{ statusLabel }}
+          </v-chip>
+        </template>
+      </v-app-bar>
+
+      <v-main>
+        <v-container fluid class="pa-4">
+          <v-row>
+            <!-- Settings Card -->
+            <v-col cols="12" md="6">
+              <v-card>
+                <v-card-title>
+                  <v-icon class="mr-2">mdi-cog</v-icon>Settings
+                </v-card-title>
+                <v-card-text>
+                  <v-text-field
+                    v-model="settings.camera_ip"
+                    label="Camera IP"
+                    prepend-inner-icon="mdi-ip-network"
+                    variant="outlined"
+                    density="compact"
+                    class="mb-2"
+                    :disabled="status.running"
+                  ></v-text-field>
+                  <v-text-field
+                    v-model="settings.telnet_user"
+                    label="Telnet Username"
+                    prepend-inner-icon="mdi-account"
+                    variant="outlined"
+                    density="compact"
+                    class="mb-2"
+                    :disabled="status.running"
+                  ></v-text-field>
+                  <v-text-field
+                    v-model="settings.telnet_password"
+                    label="Telnet Password"
+                    prepend-inner-icon="mdi-lock"
+                    variant="outlined"
+                    density="compact"
+                    class="mb-2"
+                    :type="showPassword ? 'text' : 'password'"
+                    :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+                    @click:append-inner="showPassword = !showPassword"
+                    :disabled="status.running"
+                  ></v-text-field>
+                  <v-text-field
+                    v-model.number="settings.interval"
+                    label="Sampling Interval (seconds)"
+                    prepend-inner-icon="mdi-timer-outline"
+                    variant="outlined"
+                    density="compact"
+                    type="number"
+                    min="0.5"
+                    step="0.5"
+                    :disabled="status.running"
+                  ></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                  <v-btn
+                    color="primary"
+                    variant="flat"
+                    :loading="savingSettings"
+                    :disabled="status.running"
+                    @click="saveSettings"
+                  >
+                    <v-icon start>mdi-content-save</v-icon>Save
+                  </v-btn>
+                  <v-spacer></v-spacer>
+                  <v-chip v-if="settingsSaved" color="success" size="small" variant="tonal">
+                    <v-icon start size="small">mdi-check</v-icon>Saved
+                  </v-chip>
+                </v-card-actions>
+              </v-card>
+            </v-col>
+
+            <!-- Monitor Control Card -->
+            <v-col cols="12" md="6">
+              <v-card>
+                <v-card-title>
+                  <v-icon class="mr-2">mdi-monitor-eye</v-icon>Monitor Control
+                </v-card-title>
+                <v-card-text>
+                  <div class="d-flex align-center mb-4">
+                    <v-btn
+                      v-if="!status.running"
+                      color="success"
+                      size="large"
+                      variant="flat"
+                      @click="startMonitor"
+                      :loading="starting"
+                    >
+                      <v-icon start>mdi-play</v-icon>Start Monitoring
+                    </v-btn>
+                    <v-btn
+                      v-else
+                      color="error"
+                      size="large"
+                      variant="flat"
+                      @click="stopMonitor"
+                      :loading="stopping"
+                    >
+                      <v-icon start>mdi-stop</v-icon>Stop Monitoring
+                    </v-btn>
+                  </div>
+
+                  <v-alert v-if="status.error" type="error" variant="tonal" density="compact" class="mb-3">
+                    {{ status.error }}
+                  </v-alert>
+
+                  <v-table density="compact" v-if="status.running || status.samples > 0">
+                    <tbody>
+                      <tr>
+                        <td class="text-medium-emphasis">Samples</td>
+                        <td class="font-weight-bold">{{ status.samples }}</td>
+                      </tr>
+                      <tr v-if="status.start_time">
+                        <td class="text-medium-emphasis">Started</td>
+                        <td>{{ formatTime(status.start_time) }}</td>
+                      </tr>
+                      <tr v-if="status.current_log">
+                        <td class="text-medium-emphasis">Log File</td>
+                        <td class="text-caption">{{ status.current_log }}</td>
+                      </tr>
+                      <tr v-if="status.last_sample && status.last_sample.temp_c != null">
+                        <td class="text-medium-emphasis">Temperature</td>
+                        <td class="font-weight-bold">{{ status.last_sample.temp_c }} &deg;C</td>
+                      </tr>
+                      <tr v-if="status.last_sample && status.last_sample.cpu_percent != null">
+                        <td class="text-medium-emphasis">CPU</td>
+                        <td class="font-weight-bold">{{ status.last_sample.cpu_percent }}%</td>
+                      </tr>
+                      <tr v-if="status.last_sample && status.last_sample.mem_memfree_kb != null">
+                        <td class="text-medium-emphasis">Memory Free</td>
+                        <td class="font-weight-bold">{{ Math.round(status.last_sample.mem_memfree_kb / 1024) }} MB</td>
+                      </tr>
+                    </tbody>
+                  </v-table>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+
+          <!-- Log Files Card -->
+          <v-row class="mt-2">
+            <v-col cols="12">
+              <v-card>
+                <v-card-title>
+                  <v-icon class="mr-2">mdi-file-document-multiple</v-icon>Log Files
+                  <v-btn icon size="small" variant="text" class="ml-2" @click="fetchLogs">
+                    <v-icon>mdi-refresh</v-icon>
+                  </v-btn>
+                </v-card-title>
+                <v-card-text>
+                  <v-alert v-if="logs.length === 0" type="info" variant="tonal" density="compact">
+                    No log files yet. Start monitoring to create one.
+                  </v-alert>
+                  <v-table v-else density="compact" hover>
+                    <thead>
+                      <tr>
+                        <th>File</th>
+                        <th>Samples</th>
+                        <th>Size</th>
+                        <th>Date</th>
+                        <th class="text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="log in logs" :key="log.name">
+                        <td class="text-caption">{{ log.name }}</td>
+                        <td>{{ log.samples }}</td>
+                        <td>{{ formatSize(log.size) }}</td>
+                        <td>{{ formatTime(log.modified) }}</td>
+                        <td class="text-right">
+                          <v-btn icon size="x-small" variant="text" color="primary" @click="viewLog(log.name)" title="View">
+                            <v-icon>mdi-chart-line</v-icon>
+                          </v-btn>
+                          <v-btn icon size="x-small" variant="text" color="info" :href="'/api/logs/' + log.name + '/download'" title="Download">
+                            <v-icon>mdi-download</v-icon>
+                          </v-btn>
+                          <v-btn icon size="x-small" variant="text" color="error" @click="deleteLog(log.name)" title="Delete"
+                            :disabled="status.running && status.current_log === log.name">
+                            <v-icon>mdi-delete</v-icon>
+                          </v-btn>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </v-table>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+
+          <!-- Log Viewer Card -->
+          <v-row v-if="viewerOpen" class="mt-2">
+            <v-col cols="12">
+              <v-card>
+                <v-card-title class="d-flex align-center">
+                  <v-icon class="mr-2">mdi-chart-line</v-icon>
+                  {{ viewerFile }}
+                  <v-spacer></v-spacer>
+                  <v-btn icon size="small" variant="text" @click="viewerOpen = false">
+                    <v-icon>mdi-close</v-icon>
+                  </v-btn>
+                </v-card-title>
+                <v-card-text>
+                  <v-progress-linear v-if="viewerLoading" indeterminate color="primary"></v-progress-linear>
+                  <template v-else-if="viewerRecords.length > 0">
+                    <v-tabs v-model="viewerTab" color="primary" density="compact" class="mb-4">
+                      <v-tab value="charts">Charts</v-tab>
+                      <v-tab value="table">Data Table</v-tab>
+                    </v-tabs>
+
+                    <div v-show="viewerTab === 'charts'">
+                      <v-row>
+                        <v-col cols="12" md="6">
+                          <div class="text-subtitle-2 mb-1">Temperature (&deg;C)</div>
+                          <canvas ref="chartTemp" height="200"></canvas>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                          <div class="text-subtitle-2 mb-1">CPU Usage (%)</div>
+                          <canvas ref="chartCpu" height="200"></canvas>
+                        </v-col>
+                      </v-row>
+                      <v-row class="mt-2">
+                        <v-col cols="12" md="6">
+                          <div class="text-subtitle-2 mb-1">Memory Used (%)</div>
+                          <canvas ref="chartMem" height="200"></canvas>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                          <div class="text-subtitle-2 mb-1">Core Voltage (mV)</div>
+                          <canvas ref="chartVolt" height="200"></canvas>
+                        </v-col>
+                      </v-row>
+                    </div>
+
+                    <div v-show="viewerTab === 'table'">
+                      <v-table density="compact" fixed-header height="400" hover>
+                        <thead>
+                          <tr>
+                            <th>Time</th>
+                            <th>Temp &deg;C</th>
+                            <th>CPU %</th>
+                            <th>Mem Used %</th>
+                            <th>Core V (mV)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="(r, i) in viewerRecords" :key="i">
+                            <td class="text-caption">{{ formatTs(r.ts) }}</td>
+                            <td>{{ r.temp_c ?? '—' }}</td>
+                            <td>{{ r.cpu_percent ?? '—' }}</td>
+                            <td>{{ r.mem_used_percent ?? '—' }}</td>
+                            <td>{{ r.core_volt ?? '—' }}</td>
+                          </tr>
+                        </tbody>
+                      </v-table>
+                    </div>
+                  </template>
+                  <v-alert v-else type="warning" variant="tonal" density="compact">
+                    No data in this log file.
+                  </v-alert>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+        </v-container>
+      </v-main>
+
+      <!-- Snackbar -->
+      <v-snackbar v-model="snackbar" :color="snackColor" timeout="3000" location="bottom right">
+        {{ snackText }}
+      </v-snackbar>
+    </v-app>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onMounted, onUnmounted, watch, nextTick } = Vue;
+    const { createVuetify } = Vuetify;
+
+    const vuetify = createVuetify({
+      theme: { defaultTheme: 'dark' },
+    });
+
+    const app = createApp({
+      setup() {
+        const settings = ref({ camera_ip: '192.168.2.10', telnet_user: 'root', telnet_password: '', interval: 2.0 });
+        const showPassword = ref(false);
+        const savingSettings = ref(false);
+        const settingsSaved = ref(false);
+
+        const status = ref({ running: false, error: null, samples: 0, start_time: null, last_sample: null, current_log: null });
+        const starting = ref(false);
+        const stopping = ref(false);
+
+        const logs = ref([]);
+        const viewerOpen = ref(false);
+        const viewerFile = ref('');
+        const viewerLoading = ref(false);
+        const viewerRecords = ref([]);
+        const viewerTab = ref('charts');
+
+        const chartTemp = ref(null);
+        const chartCpu = ref(null);
+        const chartMem = ref(null);
+        const chartVolt = ref(null);
+        let chartInstances = [];
+
+        const snackbar = ref(false);
+        const snackText = ref('');
+        const snackColor = ref('success');
+
+        let statusInterval = null;
+        let logsInterval = null;
+
+        function toast(msg, color = 'success') {
+          snackText.value = msg;
+          snackColor.value = color;
+          snackbar.value = true;
+        }
+
+        async function apiFetch(url, opts = {}) {
+          const res = await fetch(url, opts);
+          return res.json();
+        }
+
+        const statusColor = computed(() => {
+          if (status.value.error) return 'error';
+          if (status.value.running) return 'success';
+          return 'default';
+        });
+
+        const statusLabel = computed(() => {
+          if (status.value.error) return 'Error';
+          if (status.value.running) return 'Monitoring';
+          return 'Idle';
+        });
+
+        async function fetchSettings() {
+          try {
+            const data = await apiFetch('/api/settings');
+            settings.value = data;
+          } catch (e) { console.error('Failed to load settings', e); }
+        }
+
+        async function saveSettings() {
+          savingSettings.value = true;
+          settingsSaved.value = false;
+          try {
+            await apiFetch('/api/settings', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(settings.value),
+            });
+            settingsSaved.value = true;
+            toast('Settings saved');
+            setTimeout(() => settingsSaved.value = false, 3000);
+          } catch (e) {
+            toast('Failed to save settings', 'error');
+          } finally {
+            savingSettings.value = false;
+          }
+        }
+
+        async function fetchStatus() {
+          try {
+            const data = await apiFetch('/api/status');
+            status.value = data;
+          } catch (e) { console.error('Failed to fetch status', e); }
+        }
+
+        async function startMonitor() {
+          starting.value = true;
+          try {
+            const data = await apiFetch('/api/start', { method: 'POST' });
+            if (!data.success) {
+              toast(data.message || 'Failed to start', 'error');
+            } else {
+              toast('Monitoring started');
+            }
+          } catch (e) {
+            toast('Failed to start monitoring', 'error');
+          } finally {
+            starting.value = false;
+            await fetchStatus();
+          }
+        }
+
+        async function stopMonitor() {
+          stopping.value = true;
+          try {
+            await apiFetch('/api/stop', { method: 'POST' });
+            toast('Monitoring stopped');
+          } catch (e) {
+            toast('Failed to stop monitoring', 'error');
+          } finally {
+            stopping.value = false;
+            await fetchStatus();
+            await fetchLogs();
+          }
+        }
+
+        async function fetchLogs() {
+          try {
+            const data = await apiFetch('/api/logs');
+            logs.value = data.logs || [];
+          } catch (e) { console.error('Failed to fetch logs', e); }
+        }
+
+        async function deleteLog(name) {
+          try {
+            const data = await apiFetch('/api/logs/' + name, { method: 'DELETE' });
+            if (data.success) {
+              toast('Log deleted');
+              if (viewerFile.value === name) viewerOpen.value = false;
+              await fetchLogs();
+            } else {
+              toast(data.message || 'Delete failed', 'error');
+            }
+          } catch (e) {
+            toast('Failed to delete log', 'error');
+          }
+        }
+
+        function destroyCharts() {
+          chartInstances.forEach(c => c.destroy());
+          chartInstances = [];
+        }
+
+        function buildChart(canvasRef, label, labels, data, color, yMin, yMax) {
+          if (!canvasRef) return;
+          const ctx = canvasRef.getContext('2d');
+          const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels,
+              datasets: [{
+                label,
+                data,
+                borderColor: color,
+                backgroundColor: color + '22',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0,
+                borderWidth: 1.5,
+              }],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              animation: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: {
+                  display: true,
+                  ticks: { maxTicksLimit: 8, font: { size: 10 }, color: '#888' },
+                  grid: { color: '#333' },
+                },
+                y: {
+                  min: yMin,
+                  max: yMax,
+                  ticks: { font: { size: 10 }, color: '#888' },
+                  grid: { color: '#333' },
+                },
+              },
+            },
+          });
+          chartInstances.push(chart);
+        }
+
+        async function viewLog(name) {
+          viewerFile.value = name;
+          viewerOpen.value = true;
+          viewerLoading.value = true;
+          viewerTab.value = 'charts';
+          destroyCharts();
+
+          try {
+            const data = await apiFetch('/api/logs/' + name + '/data');
+            viewerRecords.value = data.records || [];
+          } catch (e) {
+            viewerRecords.value = [];
+            toast('Failed to load log data', 'error');
+          } finally {
+            viewerLoading.value = false;
+          }
+
+          await nextTick();
+          renderCharts();
+        }
+
+        function renderCharts() {
+          destroyCharts();
+          const records = viewerRecords.value;
+          if (records.length === 0) return;
+
+          const t0 = records[0].ts || 0;
+          const labels = records.map(r => {
+            const secs = (r.ts || 0) - t0;
+            const m = Math.floor(secs / 60);
+            const s = Math.round(secs % 60);
+            return m + ':' + String(s).padStart(2, '0');
+          });
+
+          const temps = records.map(r => r.temp_c ?? null);
+          const cpus = records.map(r => r.cpu_percent ?? null);
+          const mems = records.map(r => r.mem_used_percent ?? null);
+          const volts = records.map(r => r.core_volt ?? null);
+
+          buildChart(chartTemp.value, 'Temp (°C)', labels, temps, '#ff7043', undefined, undefined);
+          buildChart(chartCpu.value, 'CPU (%)', labels, cpus, '#42a5f5', 0, 100);
+          buildChart(chartMem.value, 'Mem (%)', labels, mems, '#66bb6a', 0, 100);
+          buildChart(chartVolt.value, 'Voltage (mV)', labels, volts, '#ab47bc', undefined, undefined);
+        }
+
+        watch(viewerTab, (val) => {
+          if (val === 'charts') {
+            nextTick(() => renderCharts());
+          }
+        });
+
+        function formatTime(iso) {
+          if (!iso) return '—';
+          try {
+            const d = new Date(iso);
+            return d.toLocaleString();
+          } catch { return iso; }
+        }
+
+        function formatTs(ts) {
+          if (!ts) return '—';
+          return new Date(ts * 1000).toLocaleTimeString();
+        }
+
+        function formatSize(bytes) {
+          if (bytes < 1024) return bytes + ' B';
+          if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+          return (bytes / 1048576).toFixed(1) + ' MB';
+        }
+
+        onMounted(async () => {
+          await Promise.all([fetchSettings(), fetchStatus(), fetchLogs()]);
+          statusInterval = setInterval(fetchStatus, 2000);
+          logsInterval = setInterval(fetchLogs, 10000);
+        });
+
+        onUnmounted(() => {
+          clearInterval(statusInterval);
+          clearInterval(logsInterval);
+          destroyCharts();
+        });
+
+        return {
+          settings, showPassword, savingSettings, settingsSaved, saveSettings,
+          status, starting, stopping, startMonitor, stopMonitor,
+          statusColor, statusLabel,
+          logs, fetchLogs, deleteLog,
+          viewerOpen, viewerFile, viewerLoading, viewerRecords, viewerTab, viewLog,
+          chartTemp, chartCpu, chartMem, chartVolt,
+          snackbar, snackText, snackColor,
+          formatTime, formatTs, formatSize,
+        };
+      },
+    });
+
+    app.use(vuetify);
+    app.mount('#app');
+  </script>
+</body>
+</html>
