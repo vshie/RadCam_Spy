@@ -1,7 +1,7 @@
 {
     "name": "RadCam Spy",
     "description": "Monitor RadCam IP camera SoC health via telnet: temperature, voltage, CPU, and memory.",
-    "icon": "mdi-camera-wireless",
+    "icon": "mdi-home-search",
     "company": "Blue Robotics",
     "version": "1.0.0",
     "webpage": "https://github.com/bluerobotics/radcam-spy",
