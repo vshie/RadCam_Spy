@@ -300,6 +300,11 @@ def register_service():
     return send_from_directory(app.static_folder, "register_service")
 
 
+@app.route("/icon.png")
+def icon():
+    return send_from_directory(app.static_folder, "icon.png")
+
+
 # ── API: Settings ────────────────────────────────────────────────────────────
 
 @app.route("/api/settings", methods=["GET"])
