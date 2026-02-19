@@ -11,7 +11,7 @@ COPY app/ .
 RUN mkdir -p /app/data/logs
 
 # Bundle all frontend vendor dependencies so the UI works fully offline.
-RUN mkdir -p /app/static/vendor/mdi/css /app/static/vendor/mdi/fonts \
+RUN mkdir -p /app/static/vendor/mdi/css /app/static/vendor/mdi/fonts /app/static/vendor/fonts \
     && curl -sL -o /app/static/vendor/vue.global.prod.js \
        "https://cdn.jsdelivr.net/npm/vue@3.3.11/dist/vue.global.prod.js" \
     && curl -sL -o /app/static/vendor/vuetify.min.js \
@@ -29,7 +29,13 @@ RUN mkdir -p /app/static/vendor/mdi/css /app/static/vendor/mdi/fonts \
     && curl -sL -o /app/static/vendor/mdi/fonts/materialdesignicons-webfont.eot \
        "https://cdn.jsdelivr.net/npm/@mdi/font@7.3.67/fonts/materialdesignicons-webfont.eot" \
     && curl -sL -o /app/static/vendor/mdi/fonts/materialdesignicons-webfont.ttf \
-       "https://cdn.jsdelivr.net/npm/@mdi/font@7.3.67/fonts/materialdesignicons-webfont.ttf"
+       "https://cdn.jsdelivr.net/npm/@mdi/font@7.3.67/fonts/materialdesignicons-webfont.ttf" \
+    && curl -sL -o /app/static/vendor/fonts/Inter-Regular.woff2 \
+       "https://cdn.jsdelivr.net/gh/rsms/inter@4.0/web/font-files/Inter-Regular.woff2" \
+    && curl -sL -o /app/static/vendor/fonts/Inter-Medium.woff2 \
+       "https://cdn.jsdelivr.net/gh/rsms/inter@4.0/web/font-files/Inter-Medium.woff2" \
+    && curl -sL -o /app/static/vendor/fonts/Inter-SemiBold.woff2 \
+       "https://cdn.jsdelivr.net/gh/rsms/inter@4.0/web/font-files/Inter-SemiBold.woff2"
 
 ENV PYTHONUNBUFFERED=1
 

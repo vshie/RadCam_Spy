@@ -10,8 +10,12 @@
   <script src="/static/vendor/vuetify.min.js"></script>
   <script src="/static/vendor/chart.umd.min.js"></script>
   <style>
-    html, body { margin: 0; padding: 0; background: #121212; }
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('/static/vendor/fonts/Inter-Regular.woff2') format('woff2'); }
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('/static/vendor/fonts/Inter-Medium.woff2') format('woff2'); }
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('/static/vendor/fonts/Inter-SemiBold.woff2') format('woff2'); }
+    html, body { margin: 0; padding: 0; background: #0f1117; font-family: 'Inter', sans-serif; }
     [v-cloak] { display: none; }
+    .v-table td { font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
@@ -237,19 +241,27 @@
       theme: { defaultTheme: 'dark' },
     });
 
+    Chart.defaults.color = '#8b8fa3';
+    Chart.defaults.borderColor = '#2e3348';
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.font.size = 11;
+    Chart.defaults.animation.duration = 0;
+    Chart.defaults.elements.point.radius = 0;
+    Chart.defaults.elements.line.borderWidth = 1.5;
+
     const COLORS = {
-      temp:    '#ff7043',
-      cpu:     '#42a5f5',
-      mem:     '#66bb6a',
-      coreV:   '#ab47bc',
-      cpuV:    '#ffa726',
-      npuV:    '#26c6da',
-      iso:     '#ef5350',
-      again:   '#29b6f6',
-      dgain:   '#66bb6a',
-      ispdgain:'#ffa726',
-      exptime: '#ce93d8',
-      exposure:'#4dd0e1',
+      temp:     '#CC3311',
+      cpu:      '#4477AA',
+      mem:      '#228833',
+      coreV:    '#AA3377',
+      cpuV:     '#CCBB44',
+      npuV:     '#66CCEE',
+      iso:      '#EE6677',
+      again:    '#4477AA',
+      dgain:    '#228833',
+      ispdgain: '#CCBB44',
+      exptime:  '#AA3377',
+      exposure: '#66CCEE',
     };
 
     function makeTimeLabels(records) {
@@ -268,11 +280,9 @@
         label,
         data,
         borderColor: color,
-        backgroundColor: color + '18',
-        fill: false,
-        tension: 0.3,
-        pointRadius: 0,
-        borderWidth: 2,
+        backgroundColor: color + '20',
+        fill: !dashed,
+        tension: 0.2,
         borderDash: dashed ? [6, 3] : [],
         yAxisID,
       };
@@ -296,24 +306,16 @@
           ],
         },
         options: {
-          responsive: true,
           maintainAspectRatio: false,
-          animation: false,
-          interaction: { mode: 'index', intersect: false },
+          interaction: { mode: 'nearest', axis: 'x', intersect: false },
           plugins: {
             legend: {
-              display: true,
               position: 'top',
-              labels: {
-                usePointStyle: true,
-                pointStyle: 'line',
-                padding: 14,
-                color: '#ccc',
-                font: { size: 11 },
-              },
+              labels: { boxWidth: 10, padding: 8, font: { size: 10 } },
             },
             tooltip: {
-              mode: 'index',
+              mode: 'nearest',
+              axis: 'x',
               intersect: false,
               callbacks: {
                 label: function(ctx) {
@@ -327,23 +329,18 @@
           },
           scales: {
             x: {
-              display: true,
-              ticks: { maxTicksLimit: 12, font: { size: 10 }, color: '#888' },
-              grid: { color: '#292929' },
+              ticks: { maxTicksLimit: 15 },
             },
             yLeft: {
               type: 'linear',
               position: 'left',
-              title: { display: true, text: 'Temp (°C) / CPU (%) / Mem (%)', color: '#aaa', font: { size: 11 } },
-              min: 0,
-              ticks: { font: { size: 10 }, color: '#aaa' },
-              grid: { color: '#292929' },
+              title: { display: true, text: 'Temp (°C) / CPU (%) / Mem (%)' },
+              beginAtZero: true,
             },
             yRight: {
               type: 'linear',
               position: 'right',
-              title: { display: true, text: 'Voltage (mV)', color: '#aaa', font: { size: 11 } },
-              ticks: { font: { size: 10 }, color: '#aaa' },
+              title: { display: true, text: 'Voltage (mV)' },
               grid: { drawOnChartArea: false },
             },
           },
@@ -369,47 +366,34 @@
           ],
         },
         options: {
-          responsive: true,
           maintainAspectRatio: false,
-          animation: false,
-          interaction: { mode: 'index', intersect: false },
+          interaction: { mode: 'nearest', axis: 'x', intersect: false },
           plugins: {
             legend: {
-              display: true,
               position: 'top',
-              labels: {
-                usePointStyle: true,
-                pointStyle: 'line',
-                padding: 14,
-                color: '#ccc',
-                font: { size: 11 },
-              },
+              labels: { boxWidth: 10, padding: 8, font: { size: 10 } },
             },
             tooltip: {
-              mode: 'index',
+              mode: 'nearest',
+              axis: 'x',
               intersect: false,
             },
           },
           scales: {
             x: {
-              display: true,
-              ticks: { maxTicksLimit: 12, font: { size: 10 }, color: '#888' },
-              grid: { color: '#292929' },
+              ticks: { maxTicksLimit: 15 },
             },
             yLeft: {
               type: 'linear',
               position: 'left',
-              title: { display: true, text: 'ISO / Gain', color: '#aaa', font: { size: 11 } },
-              min: 0,
-              ticks: { font: { size: 10 }, color: '#aaa' },
-              grid: { color: '#292929' },
+              title: { display: true, text: 'ISO / Gain' },
+              beginAtZero: true,
             },
             yRight: {
               type: 'linear',
               position: 'right',
-              title: { display: true, text: 'Exposure Time', color: '#aaa', font: { size: 11 } },
-              min: 0,
-              ticks: { font: { size: 10 }, color: '#aaa' },
+              title: { display: true, text: 'Exposure Time' },
+              beginAtZero: true,
               grid: { drawOnChartArea: false },
             },
           },
