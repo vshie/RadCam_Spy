@@ -23,7 +23,7 @@ Install directly from the BlueOS Extensions Manager store once published.
 2. Enter:
    - **Extension Identifier**: `bluerobotics.radcam-spy`
    - **Extension Name**: `RadCam Spy`
-   - **Docker image**: `your-dockerhub-user/radcam-spy`
+   - **Docker image**: `vshie/blueos-radcam-spy`
    - **Docker tag**: `main`
 
 ## Custom Settings (Permissions)
