@@ -268,7 +268,7 @@
         const secs = (r.ts || 0) - t0;
         const m = Math.floor(secs / 60);
         const s = Math.round(secs % 60);
-        return m + ':' + String(s).padStart(2, '0');
+        return '-' + (Math.floor((records[records.length - 1].ts - r.ts) / 60)) + ':' + String(Math.round((records[records.length - 1].ts - r.ts) % 60)).padStart(2, '0');
       });
     }
 
@@ -326,6 +326,7 @@
           },
           scales: {
             x: {
+              title: { display: true, text: 'Last 10 minutes' },
               ticks: { maxTicksLimit: 15 },
             },
             yLeft: {
@@ -378,6 +379,7 @@
           },
           scales: {
             x: {
+              title: { display: true, text: 'Last 10 minutes' },
               ticks: { maxTicksLimit: 15 },
             },
             yLeft: {
@@ -527,7 +529,7 @@
         async function fetchLive() {
           if (!status.value.running) return;
           try {
-            const data = await apiFetch('/api/live?limit=120');
+            const data = await apiFetch('/api/live?limit=600');
             const records = data.records || [];
             if (records.length === 0) return;
             await nextTick();
