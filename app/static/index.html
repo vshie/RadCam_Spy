@@ -36,7 +36,79 @@
 
       <v-main>
         <v-container fluid class="pa-4">
+          <v-row class="mb-0">
+            <v-col cols="12" class="py-0">
+              <img src="/static/radcam_spy.png" alt="RadCam Spy" style="width: 100%; height: auto; border-radius: 8px; display: block;" />
+            </v-col>
+          </v-row>
+
           <v-row>
+            <!-- Monitor Control Card -->
+            <v-col cols="12" md="6">
+              <v-card>
+                <v-card-title>
+                  <v-icon class="mr-2">mdi-monitor-eye</v-icon>Monitor Control
+                </v-card-title>
+                <v-card-text>
+                  <div class="d-flex align-center mb-4">
+                    <v-btn
+                      v-if="!status.running"
+                      color="success"
+                      size="large"
+                      variant="flat"
+                      @click="startMonitor"
+                      :loading="starting"
+                    >
+                      <v-icon start>mdi-play</v-icon>Start Monitoring
+                    </v-btn>
+                    <v-btn
+                      v-else
+                      color="error"
+                      size="large"
+                      variant="flat"
+                      @click="stopMonitor"
+                      :loading="stopping"
+                    >
+                      <v-icon start>mdi-stop</v-icon>Stop Monitoring
+                    </v-btn>
+                  </div>
+
+                  <v-alert v-if="status.error" type="error" variant="tonal" density="compact" class="mb-3">
+                    {{ status.error }}
+                  </v-alert>
+
+                  <v-table density="compact" v-if="status.running || status.samples > 0">
+                    <tbody>
+                      <tr>
+                        <td class="text-medium-emphasis">Samples</td>
+                        <td class="font-weight-bold">{{ status.samples }}</td>
+                      </tr>
+                      <tr v-if="status.start_time">
+                        <td class="text-medium-emphasis">Started</td>
+                        <td>{{ formatTime(status.start_time) }}</td>
+                      </tr>
+                      <tr v-if="status.current_log">
+                        <td class="text-medium-emphasis">Log File</td>
+                        <td class="text-caption">{{ status.current_log }}</td>
+                      </tr>
+                      <tr v-if="status.last_sample && status.last_sample.temp_c != null">
+                        <td class="text-medium-emphasis">Temperature</td>
+                        <td class="font-weight-bold">{{ status.last_sample.temp_c }} &deg;C</td>
+                      </tr>
+                      <tr v-if="status.last_sample && status.last_sample.cpu_percent != null">
+                        <td class="text-medium-emphasis">CPU</td>
+                        <td class="font-weight-bold">{{ status.last_sample.cpu_percent }}%</td>
+                      </tr>
+                      <tr v-if="status.last_sample && status.last_sample.mem_memfree_kb != null">
+                        <td class="text-medium-emphasis">Memory Free</td>
+                        <td class="font-weight-bold">{{ Math.round(status.last_sample.mem_memfree_kb / 1024) }} MB</td>
+                      </tr>
+                    </tbody>
+                  </v-table>
+                </v-card-text>
+              </v-card>
+            </v-col>
+
             <!-- Settings Card -->
             <v-col cols="12" md="6">
               <v-card>
@@ -102,79 +174,6 @@
                   </v-chip>
                 </v-card-actions>
               </v-card>
-            </v-col>
-
-            <!-- Monitor Control Card -->
-            <v-col cols="12" md="6">
-              <v-card>
-                <v-card-title>
-                  <v-icon class="mr-2">mdi-monitor-eye</v-icon>Monitor Control
-                </v-card-title>
-                <v-card-text>
-                  <div class="d-flex align-center mb-4">
-                    <v-btn
-                      v-if="!status.running"
-                      color="success"
-                      size="large"
-                      variant="flat"
-                      @click="startMonitor"
-                      :loading="starting"
-                    >
-                      <v-icon start>mdi-play</v-icon>Start Monitoring
-                    </v-btn>
-                    <v-btn
-                      v-else
-                      color="error"
-                      size="large"
-                      variant="flat"
-                      @click="stopMonitor"
-                      :loading="stopping"
-                    >
-                      <v-icon start>mdi-stop</v-icon>Stop Monitoring
-                    </v-btn>
-                  </div>
-
-                  <v-alert v-if="status.error" type="error" variant="tonal" density="compact" class="mb-3">
-                    {{ status.error }}
-                  </v-alert>
-
-                  <v-table density="compact" v-if="status.running || status.samples > 0">
-                    <tbody>
-                      <tr>
-                        <td class="text-medium-emphasis">Samples</td>
-                        <td class="font-weight-bold">{{ status.samples }}</td>
-                      </tr>
-                      <tr v-if="status.start_time">
-                        <td class="text-medium-emphasis">Started</td>
-                        <td>{{ formatTime(status.start_time) }}</td>
-                      </tr>
-                      <tr v-if="status.current_log">
-                        <td class="text-medium-emphasis">Log File</td>
-                        <td class="text-caption">{{ status.current_log }}</td>
-                      </tr>
-                      <tr v-if="status.last_sample && status.last_sample.temp_c != null">
-                        <td class="text-medium-emphasis">Temperature</td>
-                        <td class="font-weight-bold">{{ status.last_sample.temp_c }} &deg;C</td>
-                      </tr>
-                      <tr v-if="status.last_sample && status.last_sample.cpu_percent != null">
-                        <td class="text-medium-emphasis">CPU</td>
-                        <td class="font-weight-bold">{{ status.last_sample.cpu_percent }}%</td>
-                      </tr>
-                      <tr v-if="status.last_sample && status.last_sample.mem_memfree_kb != null">
-                        <td class="text-medium-emphasis">Memory Free</td>
-                        <td class="font-weight-bold">{{ Math.round(status.last_sample.mem_memfree_kb / 1024) }} MB</td>
-                      </tr>
-                    </tbody>
-                  </v-table>
-                </v-card-text>
-              </v-card>
-
-            </v-col>
-          </v-row>
-
-          <v-row class="mt-0 mb-0">
-            <v-col cols="12" class="py-0">
-              <img src="/static/radcam_spy.png" alt="RadCam Spy" style="width: 100%; height: auto; border-radius: 8px; display: block;" />
             </v-col>
           </v-row>
 
