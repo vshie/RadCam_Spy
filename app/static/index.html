@@ -187,6 +187,22 @@
             </v-col>
           </v-row>
 
+          <!-- ISP Live Chart -->
+          <v-row v-if="status.running" class="mt-2">
+            <v-col cols="12">
+              <v-card>
+                <v-card-title>
+                  <v-icon class="mr-2">mdi-camera-iris</v-icon>ISP Info
+                </v-card-title>
+                <v-card-text>
+                  <div style="position: relative; height: 320px;">
+                    <canvas ref="ispChart"></canvas>
+                  </div>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+
           <!-- BlueOS File Browser -->
           <v-row class="mt-2">
             <v-col cols="12">
@@ -228,6 +244,12 @@
       coreV:   '#ab47bc',
       cpuV:    '#ffa726',
       npuV:    '#26c6da',
+      iso:     '#ef5350',
+      again:   '#29b6f6',
+      dgain:   '#66bb6a',
+      ispdgain:'#ffa726',
+      exptime: '#ce93d8',
+      exposure:'#4dd0e1',
     };
 
     function makeTimeLabels(records) {
@@ -329,6 +351,72 @@
       });
     }
 
+    function buildISPChart(canvas, records) {
+      if (!canvas) return null;
+      const labels = makeTimeLabels(records);
+      const ctx = canvas.getContext('2d');
+      return new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            makeDataset('ISO',      records.map(r => r.isp_iso ?? null),      COLORS.iso,      'yLeft',  false),
+            makeDataset('AGain',    records.map(r => r.isp_again ?? null),    COLORS.again,    'yLeft',  false),
+            makeDataset('DGain',    records.map(r => r.isp_dgain ?? null),    COLORS.dgain,    'yLeft',  false),
+            makeDataset('ISPDGain', records.map(r => r.isp_ispdgain ?? null), COLORS.ispdgain, 'yLeft',  false),
+            makeDataset('ExpTime',  records.map(r => r.isp_exptime ?? null),  COLORS.exptime,  'yRight', true),
+            makeDataset('Exposure', records.map(r => r.isp_exposure ?? null), COLORS.exposure,  'yRight', true),
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              display: true,
+              position: 'top',
+              labels: {
+                usePointStyle: true,
+                pointStyle: 'line',
+                padding: 14,
+                color: '#ccc',
+                font: { size: 11 },
+              },
+            },
+            tooltip: {
+              mode: 'index',
+              intersect: false,
+            },
+          },
+          scales: {
+            x: {
+              display: true,
+              ticks: { maxTicksLimit: 12, font: { size: 10 }, color: '#888' },
+              grid: { color: '#292929' },
+            },
+            yLeft: {
+              type: 'linear',
+              position: 'left',
+              title: { display: true, text: 'ISO / Gain', color: '#aaa', font: { size: 11 } },
+              min: 0,
+              ticks: { font: { size: 10 }, color: '#aaa' },
+              grid: { color: '#292929' },
+            },
+            yRight: {
+              type: 'linear',
+              position: 'right',
+              title: { display: true, text: 'Exposure Time', color: '#aaa', font: { size: 11 } },
+              min: 0,
+              ticks: { font: { size: 10 }, color: '#aaa' },
+              grid: { drawOnChartArea: false },
+            },
+          },
+        },
+      });
+    }
+
     const app = createApp({
       setup() {
         const settings = ref({ camera_ip: '192.168.2.10', telnet_user: 'root', telnet_password: '', interval: 2.0 });
@@ -341,8 +429,10 @@
         const stopping = ref(false);
 
         const liveChart = ref(null);
+        const ispChart = ref(null);
         const fileBrowser = ref(null);
         let liveChartInstance = null;
+        let ispChartInstance = null;
 
         const snackbar = ref(false);
         const snackText = ref('');
@@ -450,6 +540,7 @@
         function stopLivePolling() {
           if (liveInterval) { clearInterval(liveInterval); liveInterval = null; }
           if (liveChartInstance) { liveChartInstance.destroy(); liveChartInstance = null; }
+          if (ispChartInstance) { ispChartInstance.destroy(); ispChartInstance = null; }
         }
 
         async function fetchLive() {
@@ -464,6 +555,11 @@
             } else if (liveChart.value) {
               liveChartInstance = buildMultiAxisChart(liveChart.value, records);
             }
+            if (ispChartInstance) {
+              updateISPChartData(ispChartInstance, records);
+            } else if (ispChart.value) {
+              ispChartInstance = buildISPChart(ispChart.value, records);
+            }
           } catch (e) { console.error('Live fetch error', e); }
         }
 
@@ -476,6 +572,18 @@
           chart.data.datasets[3].data = records.map(r => r.core_volt ?? null);
           chart.data.datasets[4].data = records.map(r => r.cpu_volt ?? null);
           chart.data.datasets[5].data = records.map(r => r.npu_volt ?? null);
+          chart.update('none');
+        }
+
+        function updateISPChartData(chart, records) {
+          const labels = makeTimeLabels(records);
+          chart.data.labels = labels;
+          chart.data.datasets[0].data = records.map(r => r.isp_iso ?? null);
+          chart.data.datasets[1].data = records.map(r => r.isp_again ?? null);
+          chart.data.datasets[2].data = records.map(r => r.isp_dgain ?? null);
+          chart.data.datasets[3].data = records.map(r => r.isp_ispdgain ?? null);
+          chart.data.datasets[4].data = records.map(r => r.isp_exptime ?? null);
+          chart.data.datasets[5].data = records.map(r => r.isp_exposure ?? null);
           chart.update('none');
         }
 
@@ -516,7 +624,7 @@
           settings, showPassword, savingSettings, settingsSaved, saveSettings,
           status, starting, stopping, startMonitor, stopMonitor,
           statusColor, statusLabel,
-          liveChart, fileBrowser,
+          liveChart, ispChart, fileBrowser,
           snackbar, snackText, snackColor,
           formatTime,
         };

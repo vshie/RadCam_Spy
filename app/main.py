@@ -12,6 +12,7 @@ import re
 import socket
 import time
 import threading
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -173,6 +174,35 @@ def snapshot(tn):
     return snap
 
 
+# ── ISP info (HTTP) ─────────────────────────────────────────────────────────
+
+def fetch_isp_info(host):
+    """Fetch and parse ISP info from the camera's HTTP API."""
+    url = f"http://{host}/action/getISPInfo"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception:
+        return {}
+
+    isp_str = data.get("isp_info", "")
+    result = {}
+    for key, field in (
+        ("ISO", "isp_iso"),
+        ("AGain", "isp_again"),
+        ("DGain", "isp_dgain"),
+        ("ISPDGain", "isp_ispdgain"),
+        ("ExpTime", "isp_exptime"),
+        ("Exposure", "isp_exposure"),
+        ("HistError", "isp_histerror"),
+    ):
+        m = re.search(rf"{key}:(\d+)", isp_str)
+        if m:
+            result[field] = int(m.group(1))
+    return result
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def ensure_dirs():
@@ -253,6 +283,7 @@ def monitor_loop():
         with open(log_path, "w") as f:
             while not monitor_stop_event.is_set():
                 snap = snapshot(tn)
+                snap.update(fetch_isp_info(host))
 
                 if prev_snap is not None:
                     cpu_pct = compute_cpu_percent(prev_snap, snap)
