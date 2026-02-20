@@ -53,6 +53,20 @@ When manually installing, paste this into the **Custom settings** field:
 }
 ```
 
+## Cockpit WebSocket Streaming
+
+RadCam Spy can stream live camera data (CPU temperature, voltage, and other monitored values) to Cockpit's data-lake via WebSocket.
+
+To set up the connection in Cockpit:
+
+1. Open **Menu > Settings > General**
+2. Scroll to **Generic WebSocket connections**
+3. Add the URL: `ws://{{ vehicle-address }}:9851` (e.g. `ws://192.168.1.65:9851`)
+
+![Cockpit Generic WebSocket connection](Cockpit%20Generic%20WebSocket%20connection.png)
+
+Once connected, the selected variables (configured in the RadCam Spy Settings panel under **Cockpit Streaming**) will appear in Cockpit's data-lake and can be used in widgets, mini-widgets, and HUD overlays.
+
 ## Development
 
 ### Local Testing
