@@ -144,6 +144,91 @@ def start_ws_server():
     t.start()
 
 
+# ── Mavlink2Rest integration ────────────────────────────────────────────────
+
+MAVLINK_NAMES = {
+    "temp_c":          "RC_TEMP",
+    "core_volt":       "RC_CVOLT",
+    "cpu_volt":        "RC_CPUVLT",
+    "npu_volt":        "RC_NPUVLT",
+    "cpu_percent":     "RC_CPU",
+    "mem_used_percent": "RC_MEM",
+    "isp_iso":         "RC_ISO",
+    "isp_again":       "RC_AGAIN",
+    "isp_dgain":       "RC_DGAIN",
+    "isp_ispdgain":    "RC_IDGAIN",
+    "isp_exptime":     "RC_EXPTM",
+    "isp_exposure":    "RC_EXPO",
+    "isp_histerror":   "RC_HSTER",
+}
+
+MAVLINK_ENDPOINTS = [
+    "http://host.docker.internal:6040/v1/mavlink",
+    "http://127.0.0.1:6040/v1/mavlink",
+    "http://192.168.2.2:6040/v1/mavlink",
+]
+
+_mavlink_endpoint_cache: str | None = None
+
+
+def send_to_mavlink(name: str, value: float) -> bool:
+    """Send a NAMED_VALUE_FLOAT to Mavlink2Rest."""
+    global _mavlink_endpoint_cache
+
+    name_array = [name[i] if i < len(name) else "\u0000" for i in range(10)]
+    payload = json.dumps({
+        "header": {"system_id": 255, "component_id": 0, "sequence": 0},
+        "message": {
+            "type": "NAMED_VALUE_FLOAT",
+            "time_boot_ms": 0,
+            "value": float(value),
+            "name": name_array,
+        },
+    }).encode()
+
+    endpoints = ([_mavlink_endpoint_cache] if _mavlink_endpoint_cache else []) + MAVLINK_ENDPOINTS
+    for endpoint in endpoints:
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                if resp.status == 200:
+                    _mavlink_endpoint_cache = endpoint
+                    return True
+        except Exception:
+            continue
+
+    return False
+
+
+def mavlink_broadcast(snap: dict):
+    """Send checked cockpit_vars from the snapshot to Mavlink2Rest."""
+    settings = load_settings()
+    selected = settings.get("cockpit_vars", [])
+    if not selected:
+        return
+
+    enriched = dict(snap)
+    if "mem_used_percent" not in enriched:
+        total = enriched.get("mem_memtotal_kb", 0)
+        free = enriched.get("mem_memfree_kb", 0)
+        if total > 0:
+            enriched["mem_used_percent"] = round(100.0 * (total - free) / total, 1)
+
+    for key in selected:
+        val = enriched.get(key)
+        mav_name = MAVLINK_NAMES.get(key)
+        if val is not None and mav_name is not None:
+            try:
+                send_to_mavlink(mav_name, float(val))
+            except (ValueError, TypeError):
+                pass
+
+
 # ── CameraTelnet (from camera_monitor.py) ───────────────────────────────────
 
 class CameraTelnet:
@@ -386,6 +471,7 @@ def monitor_loop():
                 f.flush()
 
                 ws_broadcast(snap)
+                mavlink_broadcast(snap)
 
                 with monitor_lock:
                     monitor_state["samples"] += 1
