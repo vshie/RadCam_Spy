@@ -150,23 +150,29 @@
                     :disabled="status.running"
                   ></v-text-field>
 
-                  <div class="text-subtitle-2 mb-1 mt-2 d-flex align-center">
-                    <v-icon size="small" class="mr-1">mdi-access-point</v-icon>
-                    Cockpit Streaming
-                    <span class="text-caption text-medium-emphasis ml-2">ws://vehicle:9851</span>
-                  </div>
-                  <v-row dense>
-                    <v-col cols="6" v-for="v in cockpitVarOptions" :key="v.value">
-                      <v-checkbox
-                        :label="v.label"
-                        :value="v.value"
-                        v-model="settings.cockpit_vars"
-                        density="compact"
-                        hide-details
-                        :disabled="status.running"
-                      ></v-checkbox>
-                    </v-col>
-                  </v-row>
+                  <v-expansion-panels variant="accordion" class="mt-2">
+                    <v-expansion-panel>
+                      <v-expansion-panel-title class="pa-2">
+                        <v-icon size="small" class="mr-1">mdi-access-point</v-icon>
+                        Cockpit Streaming
+                        <span class="text-caption text-medium-emphasis ml-2">ws://vehicle:9851</span>
+                      </v-expansion-panel-title>
+                      <v-expansion-panel-text>
+                        <v-row dense>
+                          <v-col cols="6" v-for="v in cockpitVarOptions" :key="v.value">
+                            <v-checkbox
+                              :label="v.label"
+                              :value="v.value"
+                              v-model="settings.cockpit_vars"
+                              density="compact"
+                              hide-details
+                              :disabled="status.running"
+                            ></v-checkbox>
+                          </v-col>
+                        </v-row>
+                      </v-expansion-panel-text>
+                    </v-expansion-panel>
+                  </v-expansion-panels>
                 </v-card-text>
                 <v-card-actions>
                   <v-btn

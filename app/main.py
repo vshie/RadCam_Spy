@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 
 import websockets
+from websockets.datastructures import Headers as WsHeaders
+from websockets.http11 import Response as WsResponse
 
 from flask import Flask, jsonify, request, send_file, send_from_directory, abort
 
@@ -60,6 +62,12 @@ monitor_state = {
 
 ws_clients: set = set()
 ws_loop: asyncio.AbstractEventLoop | None = None
+
+
+def ws_process_request(connection, request):
+    """Return a simple HTTP 200 for non-WebSocket probes (BlueOS service scanner)."""
+    if "Upgrade" not in request.headers:
+        return WsResponse(200, "OK", WsHeaders(), b"RadCam Spy WebSocket endpoint\n")
 
 
 async def ws_handler(websocket):
@@ -122,7 +130,7 @@ def start_ws_server():
     global ws_loop
 
     async def _serve():
-        async with websockets.serve(ws_handler, "0.0.0.0", 9851):
+        async with websockets.serve(ws_handler, "0.0.0.0", 9851, process_request=ws_process_request):
             logger.info("Cockpit WebSocket server started on ws://0.0.0.0:9851")
             await asyncio.Future()
 
