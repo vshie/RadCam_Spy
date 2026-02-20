@@ -5,6 +5,7 @@ Monitors a RadCam IP camera's HiSilicon SoC via telnet.
 Samples temperature, voltage, CPU usage, and memory usage.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -15,6 +16,8 @@ import threading
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+
+import websockets
 
 from flask import Flask, jsonify, request, send_file, send_from_directory, abort
 
@@ -35,6 +38,7 @@ DEFAULT_SETTINGS = {
     "telnet_user": "root",
     "telnet_password": "",
     "interval": 2.0,
+    "cockpit_vars": ["temp_c", "core_volt"],
 }
 
 # ── Global monitor state ────────────────────────────────────────────────────
@@ -50,6 +54,84 @@ monitor_state = {
     "last_sample": None,
     "current_log": None,
 }
+
+
+# ── Cockpit WebSocket server ─────────────────────────────────────────────────
+
+ws_clients: set = set()
+ws_loop: asyncio.AbstractEventLoop | None = None
+
+
+async def ws_handler(websocket):
+    """Handle a single Cockpit WebSocket client connection."""
+    ws_clients.add(websocket)
+    logger.info("Cockpit WS client connected: %s", websocket.remote_address)
+    try:
+        await websocket.send("radcam-connection-status=connected")
+        async for _ in websocket:
+            pass
+    except websockets.exceptions.ConnectionClosed:
+        pass
+    finally:
+        ws_clients.discard(websocket)
+        logger.info("Cockpit WS client disconnected")
+
+
+def ws_broadcast(snap):
+    """Send selected snapshot fields to all connected Cockpit WS clients."""
+    if not ws_clients or ws_loop is None:
+        return
+
+    settings = load_settings()
+    selected = settings.get("cockpit_vars", [])
+    if not selected:
+        return
+
+    enriched = dict(snap)
+    if "mem_used_percent" not in enriched:
+        total = enriched.get("mem_memtotal_kb", 0)
+        free = enriched.get("mem_memfree_kb", 0)
+        if total > 0:
+            enriched["mem_used_percent"] = round(100.0 * (total - free) / total, 1)
+
+    messages = []
+    for key in selected:
+        val = enriched.get(key)
+        if val is not None:
+            ws_key = "radcam-" + key.replace("_", "-")
+            messages.append(f"{ws_key}={val}")
+
+    if not messages:
+        return
+
+    async def _send():
+        dead = set()
+        for client in ws_clients.copy():
+            try:
+                for msg in messages:
+                    await client.send(msg)
+            except Exception:
+                dead.add(client)
+        ws_clients.difference_update(dead)
+
+    asyncio.run_coroutine_threadsafe(_send(), ws_loop)
+
+
+def start_ws_server():
+    """Start the WebSocket server on a background daemon thread."""
+    global ws_loop
+
+    def _run():
+        global ws_loop
+        ws_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(ws_loop)
+        start_server = websockets.serve(ws_handler, "0.0.0.0", 9851)
+        ws_loop.run_until_complete(start_server)
+        logger.info("Cockpit WebSocket server started on ws://0.0.0.0:9851")
+        ws_loop.run_forever()
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
 
 
 # ── CameraTelnet (from camera_monitor.py) ───────────────────────────────────
@@ -293,6 +375,8 @@ def monitor_loop():
                 f.write(json.dumps(snap) + "\n")
                 f.flush()
 
+                ws_broadcast(snap)
+
                 with monitor_lock:
                     monitor_state["samples"] += 1
                     monitor_state["last_sample"] = snap
@@ -361,6 +445,8 @@ def post_settings():
             current["interval"] = max(0.5, float(data["interval"]))
         except (ValueError, TypeError):
             pass
+    if "cockpit_vars" in data and isinstance(data["cockpit_vars"], list):
+        current["cockpit_vars"] = [str(v) for v in data["cockpit_vars"]]
 
     save_settings(current)
     logger.info("Settings updated")
@@ -556,5 +642,6 @@ def delete_log(name):
 
 if __name__ == "__main__":
     ensure_dirs()
-    logger.info("RadCam Spy starting on port 9850")
+    start_ws_server()
+    logger.info("RadCam Spy starting on port 9850 (WS on 9851)")
     app.run(host="0.0.0.0", port=9850)
