@@ -33,7 +33,8 @@ When manually installing, paste this into the **Custom settings** field:
 ```json
 {
   "ExposedPorts": {
-    "9850/tcp": {}
+    "9850/tcp": {},
+    "9851/tcp": {}
   },
   "HostConfig": {
     "Binds": [

@@ -39,14 +39,15 @@ RUN mkdir -p /app/static/vendor/mdi/css /app/static/vendor/mdi/fonts /app/static
 
 ENV PYTHONUNBUFFERED=1
 
-EXPOSE 9850
+EXPOSE 9850 9851
 
 LABEL version="1.0.0"
 
 LABEL permissions='\
 {\
   "ExposedPorts": {\
-    "9850/tcp": {}\
+    "9850/tcp": {},\
+    "9851/tcp": {}\
   },\
   "HostConfig": {\
     "Binds": [\

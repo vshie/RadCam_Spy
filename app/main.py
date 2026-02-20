@@ -121,14 +121,16 @@ def start_ws_server():
     """Start the WebSocket server on a background daemon thread."""
     global ws_loop
 
+    async def _serve():
+        async with websockets.serve(ws_handler, "0.0.0.0", 9851):
+            logger.info("Cockpit WebSocket server started on ws://0.0.0.0:9851")
+            await asyncio.Future()
+
     def _run():
         global ws_loop
         ws_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(ws_loop)
-        start_server = websockets.serve(ws_handler, "0.0.0.0", 9851)
-        ws_loop.run_until_complete(start_server)
-        logger.info("Cockpit WebSocket server started on ws://0.0.0.0:9851")
-        ws_loop.run_forever()
+        ws_loop.run_until_complete(_serve())
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
