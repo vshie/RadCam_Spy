@@ -163,9 +163,11 @@ MAVLINK_NAMES = {
 }
 
 MAVLINK_ENDPOINTS = [
+    "http://host.docker.internal/mavlink2rest/mavlink",
     "http://host.docker.internal:6040/v1/mavlink",
-    "http://127.0.0.1:6040/v1/mavlink",
-    "http://192.168.2.2:6040/v1/mavlink",
+    "http://192.168.2.2/mavlink2rest/mavlink",
+    "http://localhost/mavlink2rest/mavlink",
+    "http://blueos.local/mavlink2rest/mavlink",
 ]
 
 _mavlink_endpoint_cache: str | None = None
@@ -199,9 +201,13 @@ def send_to_mavlink(name: str, value: float) -> bool:
                 if resp.status == 200:
                     _mavlink_endpoint_cache = endpoint
                     return True
-        except Exception:
+                else:
+                    logger.warning("Mavlink POST to %s returned status %s", endpoint, resp.status)
+        except Exception as exc:
+            logger.warning("Mavlink POST to %s failed: %s", endpoint, exc)
             continue
 
+    logger.error("Could not send %s=%.4f to any Mavlink2Rest endpoint", name, value)
     return False
 
 
