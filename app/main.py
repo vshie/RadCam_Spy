@@ -147,19 +147,30 @@ def start_ws_server():
 # ── Mavlink2Rest integration ────────────────────────────────────────────────
 
 MAVLINK_NAMES = {
-    "temp_c":          "RC_TEMP",
-    "core_volt":       "RC_CVOLT",
-    "cpu_volt":        "RC_CPUVLT",
-    "npu_volt":        "RC_NPUVLT",
-    "cpu_percent":     "RC_CPU",
-    "mem_used_percent": "RC_MEM",
-    "isp_iso":         "RC_ISO",
-    "isp_again":       "RC_AGAIN",
-    "isp_dgain":       "RC_DGAIN",
-    "isp_ispdgain":    "RC_IDGAIN",
-    "isp_exptime":     "RC_EXPTM",
-    "isp_exposure":    "RC_EXPO",
-    "isp_histerror":   "RC_HSTER",
+    # Camera SoC
+    "temp_c":            "RC_TEMP",
+    "core_volt":         "RC_CVOLT",
+    "cpu_volt":          "RC_CPUVLT",
+    "npu_volt":          "RC_NPUVLT",
+    "cpu_percent":       "RC_CPU",
+    "mem_used_percent":  "RC_MEM",
+    "cpu_freq_mhz":      "RC_FREQ",
+    "uptime_sec":        "RC_UPTM",
+    "rtsp_clients":      "RC_RTSP",
+    "net_tx_bytes":      "RC_TXBY",
+    "net_tx_errors":     "RC_TXERR",
+    "isp_iso":           "RC_ISO",
+    "isp_again":         "RC_AGAIN",
+    "isp_dgain":         "RC_DGAIN",
+    "isp_ispdgain":      "RC_IDGAIN",
+    "isp_exptime":       "RC_EXPTM",
+    "isp_exposure":      "RC_EXPO",
+    "isp_histerror":     "RC_HSTER",
+    # Pi4 host
+    "pi4_cpu_percent":   "P4_CPU",
+    "pi4_cpu_temp_c":    "P4_TEMP",
+    "pi4_disk_free_mb":  "P4_DISK",
+    "pi4_net_rx_errors": "P4_RXERR",
 }
 
 MAVLINK_ENDPOINTS = [
@@ -323,8 +334,8 @@ def parse_stat(text):
     return {}
 
 
-def parse_meminfo(text):
-    """Parse /proc/meminfo for key fields."""
+def parse_meminfo(text, prefix="mem"):
+    """Parse /proc/meminfo for key fields. prefix controls field naming."""
     result = {}
     for line in text.splitlines():
         for key in ("MemTotal", "MemFree", "MemAvailable", "Buffers", "Cached"):
@@ -332,10 +343,67 @@ def parse_meminfo(text):
                 parts = line.split()
                 if len(parts) >= 2:
                     try:
-                        result[f"mem_{key.lower()}_kb"] = int(parts[1])
+                        result[f"{prefix}_{key.lower()}_kb"] = int(parts[1])
                     except ValueError:
                         pass
     return result
+
+
+def parse_net_dev(text, iface="eth0", prefix="net"):
+    """Parse /proc/net/dev for a given interface. Returns TX or RX stats."""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith(iface + ":"):
+            parts = line.split()
+            if len(parts) >= 11:
+                try:
+                    return {
+                        f"{prefix}_rx_bytes": int(parts[1]),
+                        f"{prefix}_rx_errors": int(parts[3]),
+                        f"{prefix}_rx_dropped": int(parts[4]),
+                        f"{prefix}_tx_bytes": int(parts[9]),
+                        f"{prefix}_tx_packets": int(parts[10]),
+                        f"{prefix}_tx_errors": int(parts[11]) if len(parts) > 11 else 0,
+                        f"{prefix}_tx_dropped": int(parts[12]) if len(parts) > 12 else 0,
+                    }
+                except (ValueError, IndexError):
+                    pass
+    return {}
+
+
+def parse_uptime(text):
+    """Parse /proc/uptime for seconds since boot."""
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 1:
+            try:
+                return {"uptime_sec": float(parts[0])}
+            except ValueError:
+                pass
+    return {}
+
+
+def parse_cpu_freq(text):
+    """Parse scaling_cur_freq (kHz) into MHz."""
+    for line in text.splitlines():
+        line = line.strip()
+        try:
+            khz = int(line)
+            return {"cpu_freq_mhz": khz // 1000}
+        except ValueError:
+            continue
+    return {}
+
+
+def parse_rtsp_count(text):
+    """Parse netstat/grep output to count RTSP connections on port 554."""
+    for line in text.splitlines():
+        line = line.strip()
+        try:
+            return {"rtsp_clients": int(line)}
+        except ValueError:
+            continue
+    return {}
 
 
 def snapshot(tn):
@@ -353,6 +421,24 @@ def snapshot(tn):
         timeout=2,
     )
     snap.update(parse_meminfo(mem_text))
+
+    net_text = tn.cmd("cat /proc/net/dev", timeout=2)
+    snap.update(parse_net_dev(net_text, prefix="net"))
+
+    freq_text = tn.cmd(
+        "cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq 2>/dev/null",
+        timeout=2,
+    )
+    snap.update(parse_cpu_freq(freq_text))
+
+    uptime_text = tn.cmd("cat /proc/uptime", timeout=2)
+    snap.update(parse_uptime(uptime_text))
+
+    rtsp_text = tn.cmd(
+        "netstat -tn 2>/dev/null | grep -c ':554 ' || echo 0",
+        timeout=2,
+    )
+    snap.update(parse_rtsp_count(rtsp_text))
 
     return snap
 
@@ -384,6 +470,85 @@ def fetch_isp_info(host):
         if m:
             result[field] = int(m.group(1))
     return result
+
+
+# ── Pi4 host monitoring ─────────────────────────────────────────────────────
+
+PI4_THERMAL_PATH = Path("/sys/class/thermal/thermal_zone0/temp")
+PI4_STAT_PATH = Path("/proc/stat")
+PI4_MEMINFO_PATH = Path("/proc/meminfo")
+PI4_NET_DEV_PATH = Path("/proc/net/dev")
+
+
+def pi4_snapshot():
+    """Collect Pi4 host metrics from local procfs/sysfs."""
+    snap = {}
+
+    # CPU temperature
+    try:
+        raw = PI4_THERMAL_PATH.read_text().strip()
+        snap["pi4_cpu_temp_c"] = round(int(raw) / 1000.0, 1)
+    except Exception:
+        snap["pi4_cpu_temp_c"] = None
+
+    # CPU jiffies (caller computes delta percentage)
+    try:
+        first_line = PI4_STAT_PATH.read_text().split("\n", 1)[0]
+        snap.update(parse_stat(first_line + "\n"))
+        # rename to pi4-specific keys so they don't collide with camera fields
+        snap["pi4_cpu_total"] = snap.pop("cpu_total", None)
+        snap["pi4_cpu_busy"] = snap.pop("cpu_busy", None)
+    except Exception:
+        snap["pi4_cpu_total"] = None
+        snap["pi4_cpu_busy"] = None
+
+    # Memory
+    try:
+        meminfo_text = PI4_MEMINFO_PATH.read_text()
+        mem = parse_meminfo(meminfo_text, prefix="pi4_mem")
+        snap["pi4_mem_total_kb"] = mem.get("pi4_mem_memtotal_kb")
+        snap["pi4_mem_avail_kb"] = mem.get("pi4_mem_memavailable_kb")
+    except Exception:
+        snap["pi4_mem_total_kb"] = None
+        snap["pi4_mem_avail_kb"] = None
+
+    # Disk free space on the data/recordings volume
+    try:
+        st = os.statvfs("/app/data")
+        snap["pi4_disk_free_mb"] = round((st.f_bavail * st.f_frsize) / (1024 * 1024), 1)
+    except Exception:
+        snap["pi4_disk_free_mb"] = None
+
+    # Network RX stats (host side, complements camera TX)
+    try:
+        net_text = PI4_NET_DEV_PATH.read_text()
+        # Try common interface names; eth0 is typical for Pi4 wired
+        net = parse_net_dev(net_text, iface="eth0", prefix="pi4_net")
+        if not net:
+            net = parse_net_dev(net_text, iface="end0", prefix="pi4_net")
+        snap["pi4_net_rx_bytes"] = net.get("pi4_net_rx_bytes")
+        snap["pi4_net_rx_errors"] = net.get("pi4_net_rx_errors")
+        snap["pi4_net_rx_dropped"] = net.get("pi4_net_rx_dropped")
+    except Exception:
+        snap["pi4_net_rx_bytes"] = None
+        snap["pi4_net_rx_errors"] = None
+        snap["pi4_net_rx_dropped"] = None
+
+    return snap
+
+
+def compute_pi4_cpu_percent(prev, curr):
+    """Compute Pi4 CPU% between two snapshots."""
+    pt = prev.get("pi4_cpu_total")
+    pb = prev.get("pi4_cpu_busy")
+    ct = curr.get("pi4_cpu_total")
+    cb = curr.get("pi4_cpu_busy")
+    if pt is None or ct is None or pb is None or cb is None:
+        return None
+    dt = ct - pt
+    if dt <= 0:
+        return None
+    return round(100.0 * (cb - pb) / dt, 1)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -467,11 +632,15 @@ def monitor_loop():
             while not monitor_stop_event.is_set():
                 snap = snapshot(tn)
                 snap.update(fetch_isp_info(host))
+                snap.update(pi4_snapshot())
 
                 if prev_snap is not None:
                     cpu_pct = compute_cpu_percent(prev_snap, snap)
                     if cpu_pct is not None:
                         snap["cpu_percent"] = cpu_pct
+                    pi4_pct = compute_pi4_cpu_percent(prev_snap, snap)
+                    if pi4_pct is not None:
+                        snap["pi4_cpu_percent"] = pi4_pct
 
                 f.write(json.dumps(snap) + "\n")
                 f.flush()

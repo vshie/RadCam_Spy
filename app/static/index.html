@@ -158,18 +158,21 @@
                         <span class="text-caption text-medium-emphasis ml-2">ws://vehicle:9851</span>
                       </v-expansion-panel-title>
                       <v-expansion-panel-text>
-                        <v-row dense>
-                          <v-col cols="6" v-for="v in cockpitVarOptions" :key="v.value">
-                            <v-checkbox
-                              :label="v.label"
-                              :value="v.value"
-                              v-model="settings.cockpit_vars"
-                              density="compact"
-                              hide-details
-                              :disabled="status.running"
-                            ></v-checkbox>
-                          </v-col>
-                        </v-row>
+                        <template v-for="group in cockpitVarGroups" :key="group.name">
+                          <div class="text-caption text-medium-emphasis font-weight-bold mt-2 mb-1">{{ group.name }}</div>
+                          <v-row dense>
+                            <v-col cols="6" v-for="v in group.items" :key="v.value">
+                              <v-checkbox
+                                :label="v.label"
+                                :value="v.value"
+                                v-model="settings.cockpit_vars"
+                                density="compact"
+                                hide-details
+                                :disabled="status.running"
+                              ></v-checkbox>
+                            </v-col>
+                          </v-row>
+                        </template>
                       </v-expansion-panel-text>
                     </v-expansion-panel>
                   </v-expansion-panels>
@@ -422,25 +425,45 @@
     }
 
     const COCKPIT_VAR_OPTIONS = [
-      { value: 'temp_c',          label: 'Temperature (°C)' },
-      { value: 'core_volt',       label: 'Core Voltage' },
-      { value: 'cpu_volt',        label: 'CPU Voltage' },
-      { value: 'npu_volt',        label: 'NPU Voltage' },
-      { value: 'cpu_percent',     label: 'CPU %' },
-      { value: 'mem_used_percent', label: 'Mem Used %' },
-      { value: 'isp_iso',         label: 'ISP ISO' },
-      { value: 'isp_again',       label: 'ISP AGain' },
-      { value: 'isp_dgain',       label: 'ISP DGain' },
-      { value: 'isp_ispdgain',    label: 'ISP ISPDGain' },
-      { value: 'isp_exptime',     label: 'ISP ExpTime' },
-      { value: 'isp_exposure',    label: 'ISP Exposure' },
-      { value: 'isp_histerror',   label: 'ISP HistError' },
+      { value: 'temp_c',            label: 'Cam Temperature (°C)', group: 'Camera' },
+      { value: 'core_volt',         label: 'Cam Core Voltage',     group: 'Camera' },
+      { value: 'cpu_volt',          label: 'Cam CPU Voltage',      group: 'Camera' },
+      { value: 'npu_volt',          label: 'Cam NPU Voltage',      group: 'Camera' },
+      { value: 'cpu_percent',       label: 'Cam CPU %',            group: 'Camera' },
+      { value: 'mem_used_percent',  label: 'Cam Mem Used %',       group: 'Camera' },
+      { value: 'cpu_freq_mhz',      label: 'Cam CPU Freq (MHz)',   group: 'Camera' },
+      { value: 'uptime_sec',        label: 'Cam Uptime (s)',       group: 'Camera' },
+      { value: 'rtsp_clients',      label: 'RTSP Clients',         group: 'Camera' },
+      { value: 'net_tx_bytes',      label: 'Cam Net TX Bytes',     group: 'Camera' },
+      { value: 'net_tx_errors',     label: 'Cam Net TX Errors',    group: 'Camera' },
+      { value: 'isp_iso',           label: 'ISP ISO',              group: 'Camera' },
+      { value: 'isp_again',         label: 'ISP AGain',            group: 'Camera' },
+      { value: 'isp_dgain',         label: 'ISP DGain',            group: 'Camera' },
+      { value: 'isp_ispdgain',      label: 'ISP ISPDGain',         group: 'Camera' },
+      { value: 'isp_exptime',       label: 'ISP ExpTime',          group: 'Camera' },
+      { value: 'isp_exposure',      label: 'ISP Exposure',         group: 'Camera' },
+      { value: 'isp_histerror',     label: 'ISP HistError',        group: 'Camera' },
+      { value: 'pi4_cpu_percent',   label: 'Pi4 CPU %',            group: 'Pi4' },
+      { value: 'pi4_cpu_temp_c',    label: 'Pi4 Temperature (°C)', group: 'Pi4' },
+      { value: 'pi4_mem_avail_kb',  label: 'Pi4 Mem Avail (KB)',   group: 'Pi4' },
+      { value: 'pi4_disk_free_mb',  label: 'Pi4 Disk Free (MB)',   group: 'Pi4' },
+      { value: 'pi4_net_rx_bytes',  label: 'Pi4 Net RX Bytes',     group: 'Pi4' },
+      { value: 'pi4_net_rx_errors', label: 'Pi4 Net RX Errors',    group: 'Pi4' },
     ];
 
     const app = createApp({
       setup() {
         const settings = ref({ camera_ip: '192.168.2.10', telnet_user: 'root', telnet_password: '', interval: 2.0, cockpit_vars: ['temp_c', 'core_volt'] });
         const cockpitVarOptions = COCKPIT_VAR_OPTIONS;
+        const cockpitVarGroups = (() => {
+          const map = {};
+          for (const v of COCKPIT_VAR_OPTIONS) {
+            const g = v.group || 'Other';
+            if (!map[g]) map[g] = { name: g, items: [] };
+            map[g].items.push(v);
+          }
+          return Object.values(map);
+        })();
         const showPassword = ref(false);
         const savingSettings = ref(false);
         const settingsSaved = ref(false);
@@ -642,7 +665,7 @@
         });
 
         return {
-          settings, showPassword, savingSettings, settingsSaved, saveSettings, cockpitVarOptions,
+          settings, showPassword, savingSettings, settingsSaved, saveSettings, cockpitVarOptions, cockpitVarGroups,
           status, starting, stopping, startMonitor, stopMonitor,
           statusColor, statusLabel,
           liveChart, ispChart, fileBrowser,
