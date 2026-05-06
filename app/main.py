@@ -41,7 +41,16 @@ DEFAULT_SETTINGS = {
     "telnet_password": "",
     "interval": 2.0,
     "cockpit_vars": ["temp_c", "core_volt"],
+    "last_successful_login": None,
 }
+
+# Auto-start behaviour: if credentials have ever worked, retry starting on
+# extension launch for this many seconds (camera may not be up yet at boot).
+AUTO_START_DURATION_SEC = 5 * 60
+AUTO_START_RETRY_INTERVAL_SEC = 10.0
+# After kicking off the monitor thread, wait up to this long for either a
+# real sample (success) or the thread to exit (failure) before retrying.
+AUTO_START_VERIFY_SEC = 15.0
 
 # ── Global monitor state ────────────────────────────────────────────────────
 
@@ -55,6 +64,19 @@ monitor_state = {
     "start_time": None,
     "last_sample": None,
     "current_log": None,
+}
+
+# ── Auto-start state ─────────────────────────────────────────────────────────
+
+auto_start_lock = threading.Lock()
+auto_start_thread: threading.Thread | None = None
+auto_start_stop_event = threading.Event()
+auto_start_state = {
+    "active": False,
+    "start_time": None,
+    "deadline": None,
+    "attempts": 0,
+    "last_attempt_error": None,
 }
 
 
@@ -577,6 +599,30 @@ def save_settings(settings):
         json.dump(settings, f, indent=2)
 
 
+def record_successful_login():
+    """Persist the timestamp of the most recent confirmed-good login.
+
+    Reads then writes settings.json so we only touch the
+    ``last_successful_login`` field and don't trample any concurrent edits
+    from the settings API.
+    """
+    try:
+        ensure_dirs()
+        saved = {}
+        if SETTINGS_FILE.exists():
+            try:
+                with open(SETTINGS_FILE) as f:
+                    saved = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                saved = {}
+        saved["last_successful_login"] = datetime.now().isoformat()
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(saved, f, indent=2)
+        logger.info("Recorded successful login at %s", saved["last_successful_login"])
+    except Exception as exc:
+        logger.warning("Could not save last_successful_login: %s", exc)
+
+
 def compute_cpu_percent(prev, curr):
     """Compute CPU% between two snapshots that have cpu_total/cpu_busy."""
     dt = curr.get("cpu_total", 0) - prev.get("cpu_total", 0)
@@ -626,6 +672,7 @@ def monitor_loop():
         monitor_state["current_log"] = log_filename
 
     prev_snap = None
+    samples_collected = 0
 
     try:
         with open(log_path, "w") as f:
@@ -651,6 +698,11 @@ def monitor_loop():
                 with monitor_lock:
                     monitor_state["samples"] += 1
                     monitor_state["last_sample"] = snap
+
+                samples_collected += 1
+                if samples_collected == 1:
+                    # First real sample proves credentials + commands work.
+                    record_successful_login()
 
                 prev_snap = snap
 
@@ -696,7 +748,11 @@ def icon():
 @app.route("/api/settings", methods=["GET"])
 def get_settings():
     settings = load_settings()
-    safe = {**settings, "telnet_password": "••••••••" if settings.get("telnet_password") else ""}
+    safe = {
+        **settings,
+        "telnet_password": "••••••••" if settings.get("telnet_password") else "",
+        "has_password": bool(settings.get("telnet_password")),
+    }
     return jsonify(safe)
 
 
@@ -724,19 +780,23 @@ def post_settings():
     return jsonify({"success": True})
 
 
-# ── API: Monitor control ────────────────────────────────────────────────────
+# ── Monitor start helper (shared by HTTP + auto-start) ──────────────────────
 
-@app.route("/api/start", methods=["POST"])
-def start_monitor():
+def _start_monitor_thread() -> tuple[bool, str | None]:
+    """Spawn the monitor thread if eligible.
+
+    Returns (started, error_message). ``error_message`` is None on success.
+    Caller is responsible for cancelling the auto-start loop if appropriate.
+    """
     global monitor_thread, monitor_state
 
     with monitor_lock:
         if monitor_state["running"]:
-            return jsonify({"success": False, "message": "Already monitoring"}), 400
+            return False, "Already monitoring"
 
     settings = load_settings()
     if not settings.get("telnet_password"):
-        return jsonify({"success": False, "message": "Telnet password not configured. Set it in Settings first."}), 400
+        return False, "Telnet password not configured. Set it in Settings first."
 
     monitor_stop_event.clear()
 
@@ -752,12 +812,126 @@ def start_monitor():
 
     monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
     monitor_thread.start()
+    return True, None
+
+
+# ── Auto-start loop ─────────────────────────────────────────────────────────
+
+def _cancel_auto_start(reason: str = "") -> None:
+    """Signal the auto-start retry loop to exit, if it is running."""
+    auto_start_stop_event.set()
+    with auto_start_lock:
+        if auto_start_state["active"]:
+            logger.info("Auto-start: cancelling%s", f" ({reason})" if reason else "")
+        auto_start_state["active"] = False
+
+
+def _auto_start_loop() -> None:
+    deadline = time.time() + AUTO_START_DURATION_SEC
+
+    with auto_start_lock:
+        auto_start_state.update({
+            "active": True,
+            "start_time": datetime.now().isoformat(),
+            "deadline": datetime.fromtimestamp(deadline).isoformat(),
+            "attempts": 0,
+            "last_attempt_error": None,
+        })
+
+    logger.info("Auto-start: arming retries for %d seconds", AUTO_START_DURATION_SEC)
+
+    try:
+        while time.time() < deadline:
+            if auto_start_stop_event.is_set():
+                return
+
+            with monitor_lock:
+                already_running = monitor_state["running"]
+            if already_running:
+                logger.info("Auto-start: monitor already running; finishing")
+                return
+
+            with auto_start_lock:
+                auto_start_state["attempts"] += 1
+                attempt = auto_start_state["attempts"]
+            logger.info("Auto-start: attempt #%d", attempt)
+
+            started, err = _start_monitor_thread()
+            if not started:
+                with auto_start_lock:
+                    auto_start_state["last_attempt_error"] = err
+                logger.warning("Auto-start: could not start: %s", err)
+            else:
+                # Wait for the monitor to either fail (running goes False) or
+                # produce its first sample (success).
+                end = time.time() + AUTO_START_VERIFY_SEC
+                samples = 0
+                running = True
+                err = None
+                while time.time() < end:
+                    if auto_start_stop_event.wait(0.5):
+                        return
+                    with monitor_lock:
+                        running = monitor_state["running"]
+                        samples = monitor_state["samples"]
+                        err = monitor_state["error"]
+                    if not running or samples > 0:
+                        break
+
+                if samples > 0:
+                    logger.info("Auto-start: monitor producing samples; finishing")
+                    return
+
+                with auto_start_lock:
+                    auto_start_state["last_attempt_error"] = err or "Monitor stopped before first sample"
+
+            remaining = max(0.0, deadline - time.time())
+            wait_time = min(AUTO_START_RETRY_INTERVAL_SEC, remaining)
+            if wait_time <= 0:
+                break
+            if auto_start_stop_event.wait(wait_time):
+                return
+    finally:
+        with auto_start_lock:
+            auto_start_state["active"] = False
+        logger.info("Auto-start: finished after %d attempt(s)", auto_start_state["attempts"])
+
+
+def maybe_start_auto_start() -> None:
+    """Kick off the auto-start retry loop if saved credentials are known good."""
+    global auto_start_thread
+
+    settings = load_settings()
+    if not settings.get("telnet_password"):
+        logger.info("Auto-start: no saved telnet password, skipping")
+        return
+    if not settings.get("last_successful_login"):
+        logger.info("Auto-start: no prior successful login on record, skipping")
+        return
+
+    auto_start_stop_event.clear()
+    auto_start_thread = threading.Thread(target=_auto_start_loop, daemon=True)
+    auto_start_thread.start()
+
+
+# ── API: Monitor control ────────────────────────────────────────────────────
+
+@app.route("/api/start", methods=["POST"])
+def start_monitor():
+    _cancel_auto_start("manual start")
+
+    started, err = _start_monitor_thread()
+    if not started:
+        status_code = 400 if err else 500
+        return jsonify({"success": False, "message": err or "Failed to start"}), status_code
 
     return jsonify({"success": True})
 
 
 @app.route("/api/stop", methods=["POST"])
 def stop_monitor():
+    _cancel_auto_start("manual stop")
+
     with monitor_lock:
         if not monitor_state["running"]:
             return jsonify({"success": True, "message": "Not running"})
@@ -770,12 +944,20 @@ def stop_monitor():
     return jsonify({"success": True})
 
 
+@app.route("/api/auto-start/cancel", methods=["POST"])
+def cancel_auto_start_route():
+    _cancel_auto_start("user cancelled")
+    return jsonify({"success": True})
+
+
 @app.route("/api/status", methods=["GET"])
 def get_status():
     with monitor_lock:
         state = dict(monitor_state)
         if state.get("last_sample"):
             state["last_sample"] = dict(state["last_sample"])
+    with auto_start_lock:
+        state["auto_start"] = dict(auto_start_state)
     return jsonify(state)
 
 
@@ -914,5 +1096,6 @@ def delete_log(name):
 if __name__ == "__main__":
     ensure_dirs()
     start_ws_server()
+    maybe_start_auto_start()
     logger.info("RadCam Spy starting on port 9850 (WS on 9851)")
     app.run(host="0.0.0.0", port=9850)

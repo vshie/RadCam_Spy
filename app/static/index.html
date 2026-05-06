@@ -65,6 +65,25 @@
                     </v-btn>
                   </div>
 
+                  <v-alert
+                    v-if="autoStartActive"
+                    type="info"
+                    variant="tonal"
+                    density="compact"
+                    class="mb-3"
+                  >
+                    <div class="d-flex align-center">
+                      <v-progress-circular indeterminate size="16" width="2" class="mr-2"></v-progress-circular>
+                      <div class="flex-grow-1">
+                        <div>Auto-starting monitor… attempt {{ status.auto_start.attempts }}</div>
+                        <div v-if="status.auto_start.last_attempt_error" class="text-caption text-medium-emphasis">
+                          {{ status.auto_start.last_attempt_error }}
+                        </div>
+                      </div>
+                      <v-btn size="x-small" variant="text" @click="cancelAutoStart">Cancel</v-btn>
+                    </div>
+                  </v-alert>
+
                   <v-alert v-if="status.error" type="error" variant="tonal" density="compact" class="mb-3">
                     {{ status.error }}
                   </v-alert>
@@ -468,9 +487,21 @@
         const savingSettings = ref(false);
         const settingsSaved = ref(false);
 
-        const status = ref({ running: false, error: null, samples: 0, start_time: null, last_sample: null, current_log: null });
+        const status = ref({
+          running: false,
+          error: null,
+          samples: 0,
+          start_time: null,
+          last_sample: null,
+          current_log: null,
+          auto_start: { active: false, attempts: 0, last_attempt_error: null },
+        });
         const starting = ref(false);
         const stopping = ref(false);
+
+        const autoStartActive = computed(() => {
+          return !!(status.value.auto_start && status.value.auto_start.active && !status.value.running);
+        });
 
         const liveChart = ref(null);
         const ispChart = ref(null);
@@ -575,6 +606,17 @@
           }
         }
 
+        async function cancelAutoStart() {
+          try {
+            await apiFetch('/api/auto-start/cancel', { method: 'POST' });
+            toast('Auto-start cancelled', 'info');
+          } catch (e) {
+            toast('Failed to cancel auto-start', 'error');
+          } finally {
+            await fetchStatus();
+          }
+        }
+
         function startLivePolling() {
           stopLivePolling();
           fetchLive();
@@ -667,6 +709,7 @@
         return {
           settings, showPassword, savingSettings, settingsSaved, saveSettings, cockpitVarOptions, cockpitVarGroups,
           status, starting, stopping, startMonitor, stopMonitor,
+          autoStartActive, cancelAutoStart,
           statusColor, statusLabel,
           liveChart, ispChart, fileBrowser,
           snackbar, snackText, snackColor,

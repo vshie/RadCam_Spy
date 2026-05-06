@@ -107,6 +107,8 @@
       errorMsg.textContent = '';
       dot.className = 'dot';
 
+      const autoStart = data.auto_start || {};
+
       if (data.error) {
         dot.classList.add('error');
         statusText.textContent = 'Error';
@@ -124,6 +126,15 @@
         if (data.samples != null) parts.push('Samples: <span>' + data.samples + '</span>');
         if (data.last_sample && data.last_sample.temp_c != null) parts.push('Temp: <span>' + data.last_sample.temp_c + '°C</span>');
         info.innerHTML = parts.join(' &middot; ');
+      } else if (autoStart.active) {
+        statusText.textContent = 'Auto-starting…';
+        startBtn.style.display = '';
+        stopBtn.style.display = 'none';
+        startBtn.disabled = false;
+        info.innerHTML = 'Attempt <span>' + (autoStart.attempts || 0) + '</span>';
+        if (autoStart.last_attempt_error) {
+          errorMsg.textContent = autoStart.last_attempt_error;
+        }
       } else {
         statusText.textContent = 'Idle';
         startBtn.style.display = '';
